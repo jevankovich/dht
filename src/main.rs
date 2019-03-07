@@ -52,6 +52,19 @@ pub struct Dht {
     //recver: JoinHandle<Result<()>>,
 }
 
+// Expands buf to be large enough for the next datagram on sock
+fn next_packet_len(sock: &UdpSocket, buf: &mut Vec<u8>) -> io::Result<()> {
+    loop {
+        let (size, _) = sock.peek_from(buf)?;
+        if size < buf.capacity() {
+            break;
+        }
+        buf.resize(buf.capacity() * 3 / 2, 0);
+    }
+
+    Ok(())
+}
+
 impl Dht {
     pub fn start<A: ToSocketAddrs>(socket: A) -> io::Result<Dht> {
         let send_sock = UdpSocket::bind(socket)?;
@@ -61,7 +74,11 @@ impl Dht {
 
         let (cmd_tx, cmd_rx) = channel::unbounded();
         let (send_tx, send_rx): (_, channel::Receiver<(Packet, SocketAddr)>) = channel::unbounded();
-        let (recv_tx, recv_rx): (_, channel::Receiver<(Packet, SocketAddr)>) = channel::bounded(10);
+
+        // This channel is bounded so a huge inrush of packets doesn't consume unbounded memory
+        // Right now it's a zero-capacity channel so it's effectively giving us the ability to
+        // select on the socket and the command channel at the same time.
+        let (recv_tx, recv_rx): (_, channel::Receiver<(Packet, SocketAddr)>) = channel::bounded(0);
 
         let sender: JoinHandle<io::Result<()>> = thread::Builder::new().spawn(move || {
             let mut buf = Vec::new();
@@ -76,6 +93,7 @@ impl Dht {
         let _recver: JoinHandle<io::Result<()>> = thread::Builder::new().spawn(move || {
             let mut buf = vec![0; 512];
             loop {
+                next_packet_len(&recv_sock, &mut buf)?;
                 let (size, peer) = recv_sock.recv_from(&mut buf)?;
                 if let Ok(pack) = deserialize(&buf[..size]) {
                     if recv_tx.send((pack, peer)).is_err() {
