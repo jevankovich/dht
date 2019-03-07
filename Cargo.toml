@@ -1,0 +1,11 @@
+[package]
+name = "dht"
+version = "0.1.0"
+authors = ["Justin Evankovich <jaevanko@mtu.edu>"]
+edition = "2018"
+
+[dependencies]
+crossbeam = "0.7"
+bytes = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+bincode = "1.1"
