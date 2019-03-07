@@ -52,19 +52,6 @@ pub struct Dht {
     //recver: JoinHandle<Result<()>>,
 }
 
-// Expands buf to be large enough for the next datagram on sock
-fn next_packet_len(sock: &UdpSocket, buf: &mut Vec<u8>) -> io::Result<()> {
-    loop {
-        let (size, _) = sock.peek_from(buf)?;
-        if size < buf.capacity() {
-            break;
-        }
-        buf.resize(buf.capacity() * 3 / 2, 0);
-    }
-
-    Ok(())
-}
-
 impl Dht {
     pub fn start<A: ToSocketAddrs>(socket: A) -> io::Result<Dht> {
         let send_sock = UdpSocket::bind(socket)?;
@@ -92,9 +79,8 @@ impl Dht {
         })?;
 
         let _recver: JoinHandle<io::Result<()>> = thread::Builder::new().spawn(move || {
-            let mut buf = vec![0; 512];
+            let mut buf = vec![0; 1 << 16]; // Maximum size of a UDP datagram
             loop {
-                next_packet_len(&recv_sock, &mut buf)?;
                 let (size, peer) = recv_sock.recv_from(&mut buf)?;
                 if let Ok(pack) = deserialize(&buf[..size]) {
                     eprintln!("Received {:?} from {}", pack, peer);
