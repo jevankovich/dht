@@ -86,6 +86,7 @@ impl Dht {
                 buf.clear();
                 serialize_into(&mut buf, &pack).unwrap();
                 let _ = send_sock.send_to(&buf, peer)?;
+                eprintln!("Sent {:?} to {}", pack, peer);
             }
             Ok(())
         })?;
@@ -96,6 +97,8 @@ impl Dht {
                 next_packet_len(&recv_sock, &mut buf)?;
                 let (size, peer) = recv_sock.recv_from(&mut buf)?;
                 if let Ok(pack) = deserialize(&buf[..size]) {
+                    eprintln!("Received {:?} from {}", pack, peer);
+
                     if recv_tx.send((pack, peer)).is_err() {
                         return Ok(());
                     }
@@ -140,7 +143,6 @@ impl Dht {
     pub fn bootstrap<A: ToSocketAddrs>(&mut self, peers: A) {
         for peer in peers.to_socket_addrs().unwrap() {
             self.command.send(Command::Ping(peer)).ok();
-            eprintln!("Queued ping for {}", peer);
         }
     }
 
@@ -151,11 +153,15 @@ impl Dht {
         // Don't wait on recver, since it will never die until it gets a packet and discovers the broken channel
         //self.recver.join().unwrap().unwrap();
     }
+
+    pub fn local_addr(&self) -> SocketAddr {
+        self.addr
+    }
 }
 
 fn main() {
     let mut dht = Dht::start("[::]:0").unwrap();
-    println!("Bound to {}", dht.addr);
+    println!("Bound to {}", dht.local_addr());
     env::args().skip(1).for_each(|a| dht.bootstrap(a));
     thread::sleep(Duration::from_millis(10000));
     dht.shutdown();
