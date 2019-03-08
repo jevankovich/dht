@@ -1,7 +1,5 @@
 #[macro_use]
 extern crate crossbeam;
-
-extern crate bincode;
 #[macro_use]
 extern crate serde;
 
@@ -16,32 +14,8 @@ use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-#[derive(Serialize, Deserialize, Debug)]
-enum Payload {
-    Ping,
-    Pong,
-}
-
-impl Payload {
-    fn is_response(&self) -> bool {
-        match self {
-            Payload::Pong => true,
-            _ => false,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct Packet {
-    seq_num: u64,
-    payload: Payload,
-}
-
-#[derive(Debug)]
-enum Command {
-    Shutdown,
-    Ping(SocketAddr),
-}
+mod kad;
+use kad::*;
 
 pub struct Dht {
     addr: SocketAddr,
@@ -60,12 +34,14 @@ impl Dht {
         let socket = send_sock.local_addr().unwrap();
 
         let (cmd_tx, cmd_rx) = channel::unbounded();
-        let (send_tx, send_rx): (_, channel::Receiver<(Packet, SocketAddr)>) = channel::unbounded();
+        let (send_tx, send_rx) = channel::unbounded();
+
+        let mut kad = Kad::new(send_tx);
 
         // This channel is bounded so a huge inrush of packets doesn't consume unbounded memory
         // Right now it's a zero-capacity channel so it's effectively giving us the ability to
         // select on the socket and the command channel at the same time.
-        let (recv_tx, recv_rx): (_, channel::Receiver<(Packet, SocketAddr)>) = channel::bounded(0);
+        let (recv_tx, recv_rx) = channel::bounded(0);
 
         let sender: JoinHandle<io::Result<()>> = thread::Builder::new().spawn(move || {
             let mut buf = Vec::new();
@@ -95,23 +71,13 @@ impl Dht {
         let worker = thread::Builder::new().spawn(move || loop {
             select! {
                 recv(cmd_rx) -> cmd => {
-                    match cmd.unwrap() {
-                        Command::Shutdown => break,
-                        Command::Ping(peer) => send_tx.send((Packet {
-                            seq_num: 0,
-                            payload: Payload::Ping,
-                        }, peer)).unwrap(),
+                    if kad.handle_command(cmd.unwrap()) {
+                        break
                     }
                 }
                 recv(recv_rx) -> packet => {
                     let (packet, peer) = packet.unwrap();
-                    match packet.payload {
-                        Payload::Ping => send_tx.send((Packet {
-                            seq_num: packet.seq_num,
-                            payload: Payload::Pong,
-                        }, peer)).unwrap(),
-                        _ => ()
-                    }
+                    kad.handle_packet(packet, peer);
                 }
             }
         })?;
