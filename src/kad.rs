@@ -97,6 +97,16 @@ impl KBuckets {
         let bucket = self.indices[bucket as usize] as usize;
 
         // Handle the case where contact is already in its bucket.
+        if let Some((i, _)) = self.k_buckets[bucket]
+            .contacts
+            .iter()
+            .enumerate()
+            .find(|(_, c)| contact == **c)
+        {
+            let contact = self.k_buckets[bucket].contacts.remove(i).unwrap();
+            self.k_buckets[bucket].contacts.push_back(contact);
+            return Ok(());
+        }
 
         // bucket is full
         if self.k_buckets[bucket].contacts.len() == K {
