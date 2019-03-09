@@ -87,12 +87,13 @@ impl KBuckets {
         // However, most networks will not have 2^256 nodes, so we can optimize for this case by starting with one K-bucket
         // and splitting it in half (so half of the nodes go in a new K-bucket and half stay in an old one).
         // This also alleviates the problem of degenerate buckets. The nearest buckets can only hold 1, 2, 4, 8, and 16 contacts.
-        // The nearest four buckets can /always/ be condensed into one K-bucket. There will never be more than 252 buckets.
+        // The nearest four buckets can /always/ be condensed into one K-bucket. There will never be more than 253 buckets.
         //
         // This approach also optimizes the query "what are the nodes I know of closest to this key". That can be looked up
         // by sending the contents of the k-bucket containing that key.
 
         let bucket = (me ^ contact.id).leading_zeros();
+        assert!(bucket < 256);
         let bucket = self.indices[bucket as usize] as usize;
 
         // Handle the case where contact is already in its bucket.
@@ -121,8 +122,11 @@ impl KBuckets {
                 self.next_to_split += 1;
 
                 for contact in old_bucket.contacts.drain(..) {
-                    self.insert(me, contact).unwrap(); // Cannot panic
+                    self.insert_unchecked(me, contact);
                 }
+                // Unlikely worst case, this could recur up to 253 times. Because this is a tail call,
+                // it can't blow that stack.
+                // If node ID's are distributed uniformly, that will almost never happen.
                 return self.insert(me, contact);
             } else {
                 return Err(self.k_buckets[bucket].contacts[0]); // Cannot panic
@@ -131,6 +135,12 @@ impl KBuckets {
             self.k_buckets[bucket].contacts.push_back(contact);
         }
         Ok(())
+    }
+
+    fn insert_unchecked(&mut self, me: NodeID, contact: Contact) {
+        let bucket = (me ^ contact.id).leading_zeros();
+        let bucket = self.indices[bucket as usize] as usize;
+        self.k_buckets[bucket].contacts.push_back(contact);
     }
 }
 
@@ -164,14 +174,14 @@ pub enum Command {
 pub struct Kad {
     send: channel::Sender<(Packet, SocketAddr)>,
 
-    known_peers: Vec<SocketAddr>,
+    known_peers: KBuckets,
 }
 
 impl Kad {
     pub fn new(send: channel::Sender<(Packet, SocketAddr)>) -> Kad {
         Kad {
             send: send,
-            known_peers: Vec::new(),
+            known_peers: KBuckets::new(),
         }
     }
 
@@ -230,7 +240,7 @@ mod test {
         let mut buckets = KBuckets::new();
 
         // insert 20 distinct peers
-        for _ in 0..20 {
+        for _ in 0..K {
             buckets.insert(me, peer).unwrap(); // Shouldn't panic
             *peer.id.bytes.last_mut().unwrap() -= 1;
         }
@@ -251,7 +261,7 @@ mod test {
             buckets.k_buckets[buckets.indices[0] as usize]
                 .contacts
                 .len(),
-            20
+            K
         );
         for i in &buckets.indices[1..] {
             assert_eq!(buckets.k_buckets[*i as usize].contacts.len(), 0);
@@ -274,7 +284,7 @@ mod test {
 
         let mut buckets = KBuckets::new();
 
-        for _ in 0..20 {
+        for _ in 0..K {
             *peer.id.bytes.last_mut().unwrap() += 1;
             buckets.insert(me, peer).unwrap(); // Shouldn't panic
         }
@@ -288,14 +298,14 @@ mod test {
             1
         );
         assert_eq!(
-            buckets.k_buckets[buckets.indices[255] as usize]
+            buckets.k_buckets[buckets.indices[KEY_BITS - 1] as usize]
                 .contacts
                 .len(),
-            20
+            K
         );
 
         peer.id.bytes = [0; KEY_BYTES];
-        *peer.id.bytes.last_mut().unwrap() = 20;
+        *peer.id.bytes.last_mut().unwrap() = K as u8;
         buckets.insert(me, peer).unwrap(); // Should end up splitting the nearest bucket
     }
 }
