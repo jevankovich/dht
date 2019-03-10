@@ -1,5 +1,6 @@
 extern crate bincode;
 extern crate crossbeam;
+extern crate rand;
 
 use crossbeam::channel;
 use std::net::SocketAddr;
@@ -24,6 +25,7 @@ impl Payload {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Packet {
+    id: NodeID,
     seq_num: u64,
     payload: Payload,
 }
@@ -37,23 +39,36 @@ pub enum Command {
 pub struct Kad {
     send: channel::Sender<(Packet, SocketAddr)>,
 
+    id: NodeID,
     known_peers: KBuckets,
 }
 
 impl Kad {
     pub fn new(send: channel::Sender<(Packet, SocketAddr)>) -> Kad {
         Kad {
+            id: rand::random(),
             send: send,
             known_peers: KBuckets::new(),
         }
     }
 
     pub fn handle_packet(&mut self, pack: Packet, peer: SocketAddr) {
+        self.known_peers
+            .insert(
+                self.id,
+                Contact {
+                    id: pack.id,
+                    addr: peer,
+                },
+            )
+            .ok();
+
         match pack.payload {
             Payload::Ping => self
                 .send
                 .send((
                     Packet {
+                        id: self.id,
                         seq_num: pack.seq_num,
                         payload: Payload::Pong,
                     },
@@ -66,11 +81,12 @@ impl Kad {
 
     pub fn handle_command(&mut self, command: Command) -> bool {
         match command {
-            Command::Shutdown => return true,
+            Command::Shutdown => return false,
             Command::Ping(peer) => self
                 .send
                 .send((
                     Packet {
+                        id: self.id,
                         seq_num: 0,
                         payload: Payload::Ping,
                     },
@@ -79,6 +95,6 @@ impl Kad {
                 .unwrap(),
         };
 
-        false
+        true
     }
 }

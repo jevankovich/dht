@@ -7,12 +7,10 @@ use crossbeam::channel;
 
 use bincode::{deserialize, serialize_into};
 
-use std::env;
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::thread;
 use std::thread::JoinHandle;
-use std::time::Duration;
 
 mod kad;
 use kad::*;
@@ -109,12 +107,4 @@ impl Dht {
     pub fn local_addr(&self) -> SocketAddr {
         self.addr
     }
-}
-
-fn main() {
-    let mut dht = Dht::start("[::]:0").unwrap();
-    println!("Bound to {}", dht.local_addr());
-    env::args().skip(1).for_each(|a| dht.bootstrap(a));
-    thread::sleep(Duration::from_millis(10000));
-    dht.shutdown();
 }

@@ -1,11 +1,14 @@
 use std::collections::VecDeque;
 use std::net::SocketAddr;
 
+use rand::distributions::Standard;
+use rand::prelude::*;
+
 pub const K: usize = 20;
 pub const KEY_BITS: usize = 256;
 pub const KEY_BYTES: usize = KEY_BITS / 8;
 
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct NodeID {
     pub(crate) bytes: [u8; KEY_BYTES],
 }
@@ -37,6 +40,19 @@ impl std::ops::BitXor for NodeID {
             .enumerate()
             .for_each(|(i, x)| ret.bytes[i] = x);
 
+        ret
+    }
+}
+
+impl Distribution<NodeID> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> NodeID {
+        let mut ret = NodeID {
+            bytes: [0; KEY_BYTES],
+        };
+
+        for b in ret.bytes.iter_mut() {
+            *b = rng.gen();
+        }
         ret
     }
 }
